@@ -1,0 +1,23 @@
+# Backend image: shared by the FastAPI web service and the Celery worker.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Build tools needed by some wheels (e.g. chromadb / onnxruntime deps).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+COPY backend ./backend
+
+EXPOSE 8000
+
+# Default command runs the API; the worker service overrides this in compose.
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

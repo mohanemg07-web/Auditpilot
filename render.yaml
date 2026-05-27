@@ -1,0 +1,85 @@
+# Render Blueprint for AuditPilot.
+# Deploy:  push this repo to GitHub, then "New +" -> "Blueprint" in Render and
+# point it at this file. Fill the secret env vars (sync:false) in the dashboard.
+#
+# NOTE: Render disks attach to exactly one service. The whole LangGraph pipeline
+# (including ChromaDB retrieval) runs inside the Celery worker, so the persistent
+# Chroma disk is attached to the worker only. The web/API service is stateless
+# and talks to Redis exclusively.
+
+envVarGroups:
+  - name: auditpilot-shared
+    envVars:
+      - key: LANGCHAIN_TRACING_V2
+        value: "true"
+      - key: LANGCHAIN_PROJECT
+        value: auditpilot
+      - key: LANGCHAIN_ENDPOINT
+        value: https://api.smith.langchain.com
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LANGCHAIN_API_KEY
+        sync: false
+      - key: SEC_USER_AGENT
+        sync: false
+
+services:
+  # ---- Managed Redis (Celery broker + result backend) ----
+  - type: redis
+    name: auditpilot-redis
+    plan: free
+    ipAllowList: []          # internal access only
+    maxmemoryPolicy: noeviction
+
+  # ---- FastAPI backend (web) ----
+  - type: web
+    name: auditpilot-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    dockerCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - fromGroup: auditpilot-shared
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: auditpilot-redis
+          property: connectionString
+
+  # ---- Celery worker (background) ----
+  - type: worker
+    name: auditpilot-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    plan: starter
+    dockerCommand: celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2
+    disk:
+      name: chroma-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - fromGroup: auditpilot-shared
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: auditpilot-redis
+          property: connectionString
+      - key: CHROMA_PERSIST_DIR
+        value: /var/data/chroma_db
+
+  # ---- Streamlit frontend (web) ----
+  - type: web
+    name: auditpilot-frontend
+    runtime: docker
+    dockerfilePath: ./Dockerfile.frontend
+    dockerContext: .
+    plan: starter
+    dockerCommand: streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      # Set this to the backend service's public URL after first deploy,
+      # e.g. https://auditpilot-backend.onrender.com
+      - key: BACKEND_URL
+        sync: false
