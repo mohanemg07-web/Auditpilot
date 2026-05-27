@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Compile & validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Byte-compile sources
+        run: python -m compileall backend/ frontend/ evals/
+
+      - name: Prepare .env for compose validation
+        # docker-compose.yml references `env_file: .env`, which is gitignored.
+        # The example template is enough to validate the compose schema.
+        run: cp .env.example .env
+
+      - name: Validate docker-compose config
+        run: docker compose config --quiet
