@@ -90,8 +90,13 @@ def _stream_memo(messages: list, on_token: Callable[[str], None] | None) -> str:
 
 
 def memo_writer_node(
-    state: dict[str, Any], config: RunnableConfig | None = None
+    state: dict[str, Any], config: RunnableConfig = None
 ) -> dict[str, Any]:
+    # NOTE: annotated as bare `RunnableConfig` (not `RunnableConfig | None`) on
+    # purpose: with `from __future__ import annotations` active, LangGraph's node
+    # signature check only injects the runtime config when the stringified
+    # annotation is exactly "RunnableConfig" or "Optional[RunnableConfig]". That
+    # injected config carries our live token-streaming callback.
     """LangGraph node: stream and assemble the final markdown memo."""
     on_token: Callable[[str], None] | None = None
     if config:
